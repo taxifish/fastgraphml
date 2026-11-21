@@ -92,7 +92,8 @@ class GraphUtils:
         1. Perform Random Node Split i.e. splitting data into train, val and test set
            (only if the graph has labels and is not split already).
         2. AddMetaPaths (only if metapaths are passed, i.e. for DMGI).
-        3. Applies the user defined transform.
+        3. Converts integer node features to float.
+        4. Applies the user defined transform.
 
         :pyg_data (tpye: PyG data object): PyG data object
         """
@@ -112,6 +113,13 @@ class GraphUtils:
                 drop_orig_edge_types=True,
                 drop_unconnected_node_types=True,
             )(pyg_data)
+
+        # Features stored as integers (counts, 0/1 flags) arrive as integer tensors.
+        # The models and transforms such as NormalizeFeatures need floats.
+        for store in pyg_data.node_stores:
+            x = getattr(store, "x", None)
+            if isinstance(x, torch.Tensor) and not x.is_floating_point():
+                store.x = x.float()
 
         if self.transform is not None:
             pyg_data = self.transform(pyg_data)

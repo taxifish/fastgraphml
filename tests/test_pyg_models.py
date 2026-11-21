@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 import numpy as np
 import pytest
 import torch
+import torch_geometric.transforms as T
 import torch_geometric.typing as pyg_typing
 from torch_geometric.data import Data, HeteroData
 
@@ -103,6 +104,28 @@ def test_training_without_neighbor_sampling(monkeypatch: pytest.MonkeyPatch) -> 
     assert model.train_loader is None
     model._train(epochs=2, **NO_CKP)
     assert model.get_embeddings().shape == (NUM_NODES, 8)
+
+
+def test_integer_features() -> None:
+    # word counts stored as integers, as they come out of ArangoDB
+    graph = homo_graph()
+    graph.x = torch.randint(0, 3, (NUM_NODES, 16))
+    model = SAGE(pyg_graph=graph, embedding_size=8, transform=T.NormalizeFeatures())
+    assert model.G.x.is_floating_point()
+    model._train(epochs=1, **NO_CKP)
+    assert np.isfinite(model.get_embeddings()).all()
+
+    hetero = hetero_graph()
+    hetero["movie"].x = torch.randint(0, 3, (80, 16))
+    model = DMGI(
+        pyg_graph=hetero,
+        metapaths=[[("movie", "actor"), ("actor", "movie")]],
+        key_node="movie",
+        embedding_size=4,
+        transform=T.NormalizeFeatures(),
+    )
+    model._train(epochs=1, **NO_CKP)
+    assert np.isfinite(model.get_embeddings()["movie"]).all()
 
 
 def test_wrong_inputs() -> None:
