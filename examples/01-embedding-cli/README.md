@@ -89,7 +89,7 @@ label (`y`). It prints a metagraph to copy into a config and correct.
                 "transform": ["NormalizeFeatures"] }
   },
   "train": { "epochs": 10, "lr": 0.005 },
-  "store": { "collection": "product_embeddings", "nearest_neighbors": 10,
+  "store": { "collection": "cli_product_embeddings", "nearest_neighbors": 10,
              "class_names": { "0": "Desktops", "1": "Data Storage" } }
 }
 ```

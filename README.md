@@ -175,6 +175,8 @@ Project | What it shows | Interface
 [Product recommender](examples/02-product-recommender/README.md) | Recommendations on the Amazon Computers co-purchase graph with GraphSAGE | FastAPI + React
 [Clinical site finder](examples/03-clinical-site-finder/README.md) | Lookalike search on a heterogeneous graph with METAPATH2VEC | FastAPI + React
 
+The `fex` command in the repository root sets them up and runs them: `./fex prepare`, `./fex status`, `./fex run ex2` (see the [examples README](examples/README.md)).
+
 The two notebooks in the same folder walk through the Amazon Computers and the DBLP graph step by step.
 
 ## Models Supported

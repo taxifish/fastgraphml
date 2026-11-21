@@ -25,6 +25,37 @@ flowchart LR
     E --> F[terminal or React app]
 ```
 
+## The `fex` command
+
+`fex`, in the repository root, prepares the environment and the data, shows what
+state everything is in, and runs the examples. It needs nothing but Python 3.10+ to
+start with.
+
+```bash
+./fex prepare          # virtual environment, packages, examples/.env, web interfaces
+./fex link             # optional: put `fex` on your PATH (~/.local/bin or ~/bin)
+fex env set ARANGO_PASSWORD=... ARANGO_USER=...      # database settings
+fex db init            # optional: create the database and user, asks for the root password
+fex db load all        # load the data of all examples
+fex status             # environment, settings, database content, running apps
+fex run ex2            # start the product recommender at http://localhost:8000
+```
+
+| Command | What it does |
+| ------- | ------------ |
+| `fex prepare` | Creates `.venv`, installs PyTorch, fastgraphml, the ArangoDB adapter and the example packages, creates `examples/.env`, builds both web interfaces. Skips what is already done. Options: `--python`, `--extensions`, `--skip-frontend`, `--rebuild` |
+| `fex status` | Installed versions, settings, database connection, documents per collection, running apps |
+| `fex env` / `fex env set KEY=VALUE ...` | Shows or changes `examples/.env` (the password is never printed) |
+| `fex db` | Collections of the examples and their document counts |
+| `fex db init` | Creates the database and user named in `.env`, with access to that database only. Existing ones are left alone |
+| `fex db load ex1\|ex2\|ex3\|all` | Loads the product graph (ex1, ex2) and the clinical trial graph (ex3) |
+| `fex db clean ex1\|ex2\|ex3\|all` | Drops the collections of an example after confirmation. `--embeddings-only` keeps the data |
+| `fex train ex2\|ex3` | Trains and stores embeddings in the terminal, with the full error output. Options: `--epochs`, `--model`, `--offline` |
+| `fex run ex1` | Runs the embedding pipeline. With more arguments it runs any `fgml.py` command: `fex run ex1 similar runs/cora 42 -k 5` |
+| `fex run ex2\|ex3` | Starts the web app. Options: `--offline`, `--port`, `--open`, `--dev` (Vite dev server with hot reload) |
+
+Everything `fex` does can also be done by hand; the next sections say how.
+
 ## Status
 
 Every project has two modes:
@@ -103,7 +134,8 @@ What the examples create in that database:
 | Collection | Created by | Content |
 | ---------- | ---------- | ------- |
 | `Computer_Products`, `bought_together` | `load-demo` / `load_data` of projects 01 and 02 | Amazon Computers co-purchase graph |
-| `product_embeddings` | projects 01 and 02 | one embedding per product |
+| `cli_product_embeddings` | project 01 | one embedding per product |
+| `product_embeddings` | project 02 | one embedding per product, with its map position |
 | `site`, `trial`, `indication`, `sponsor`, `conducts`, `studies`, `funds` | `load_data` of project 03 | synthetic clinical trial graph |
 | `site_embeddings` | project 03 | one embedding per site |
 

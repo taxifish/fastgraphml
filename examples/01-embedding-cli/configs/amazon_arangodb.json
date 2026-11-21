@@ -1,6 +1,6 @@
 {
   "name": "amazon",
-  "description": "GraphSAGE on the Amazon Computer Products graph stored in ArangoDB (load it with `fgml.py load-demo`). Embeddings are stored in the product_embeddings collection.",
+  "description": "GraphSAGE on the Amazon Computer Products graph stored in ArangoDB (load it with `fgml.py load-demo`). Embeddings are stored in the cli_product_embeddings collection.",
   "source": {
     "type": "arangodb",
     "graph": "product_graph",
@@ -36,7 +36,7 @@
     "lr": 0.005
   },
   "store": {
-    "collection": "product_embeddings",
+    "collection": "cli_product_embeddings",
     "nearest_neighbors": 10,
     "class_names": {
       "0": "Desktops",

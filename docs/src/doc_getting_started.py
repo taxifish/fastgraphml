@@ -206,13 +206,13 @@ embeddings = model.get_embeddings()
 ''')}</li>
 <li><b>Store</b> the embeddings where the rest of your application can read them.
 {code('''
-model.graph_util.store_embeddings(embeddings, collection_name="product_embeddings")
+model.graph_util.store_embeddings(embeddings, collection_name="my_product_embeddings")
 ''')}</li>
 <li><b>Query</b> in AQL. Every embedding document has the <code>_key</code> of its product
 and a <code>source_id</code> pointing at it.
 {code('''
-LET q = DOCUMENT("product_embeddings", @key).embedding
-FOR e IN product_embeddings
+LET q = DOCUMENT("my_product_embeddings", @key).embedding
+FOR e IN my_product_embeddings
     FILTER e._key != @key
     LET score = COSINE_SIMILARITY(e.embedding, q)
     SORT score DESC
@@ -266,6 +266,21 @@ them.</p>
     ["<code>03-clinical-site-finder</code>", "Find trial sites that resemble the experienced ones", "METAPATH2VEC", "FastAPI + React"],
 ], ["28%", "40%", "16%", "16%"])}
 {fig(diagrams.examples_flow(), "The flow all three projects share: train from the graph, store the embeddings, answer questions with AQL.")}
+<h3>One command for all of them: fex</h3>
+<p>The launcher <code>fex</code> in the repository root prepares the environment and the
+data, shows the state of everything and runs the examples. Everything it does can also be
+done by hand, as the following sections show.</p>
+{code('''
+./fex prepare                         # environment, packages, examples/.env, web interfaces
+./fex link                            # optional: put fex on your PATH
+fex env set ARANGO_PASSWORD=...       # database settings (ARANGO_URL, ARANGO_DB, ARANGO_USER, ARANGO_VERIFY)
+fex db init                           # optional: create database and user, asks for the root password
+fex db load all                       # load the data of all examples
+fex status                            # installed versions, settings, collections, running apps
+fex train ex3                         # train in the terminal, with the full error output
+fex run ex2                           # product recommender at http://localhost:8000
+fex run ex3 --offline                 # site finder without ArangoDB, http://localhost:8001
+''', "bash")}
 <h3>Two modes</h3>
 <p><b>ArangoDB mode</b> is the default: graph and embeddings live in the database configured
 in <code>examples/.env</code> (copy <code>examples/.env.example</code> and fill in the password
@@ -279,7 +294,8 @@ not been run yet.</div>
 <h3>What the examples create in the database</h3>
 {table(["Collections", "Created by"], [
     ["<code>Computer_Products</code>, <code>bought_together</code>", "<code>fgml.py load-demo</code> or <code>python -m backend.load_data</code> in project 02"],
-    ["<code>product_embeddings</code>", "training in projects 01 and 02"],
+    ["<code>cli_product_embeddings</code>", "the pipeline of project 01"],
+    ["<code>product_embeddings</code>", "training in project 02"],
     ["<code>site</code>, <code>trial</code>, <code>indication</code>, <code>sponsor</code>, <code>conducts</code>, <code>studies</code>, <code>funds</code>", "<code>python -m backend.load_data</code> in project 03"],
     ["<code>site_embeddings</code>", "training in project 03"],
 ], ["56%", "44%"])}
@@ -336,7 +352,7 @@ and stores the result with the ten nearest neighbours of every product:</p>
     "params": { "embedding_size": 64, "batch_size": 512, "transform": ["NormalizeFeatures"] }
   },
   "train": { "epochs": 10, "lr": 0.005 },
-  "store": { "collection": "product_embeddings", "nearest_neighbors": 10 }
+  "store": { "collection": "cli_product_embeddings", "nearest_neighbors": 10 }
 }
 ''', "json")}
 <p>The fastgraphml part of the tool is short. The model is built from the config by name, and

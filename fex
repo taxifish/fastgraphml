@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Launcher of the example projects CLI, see `./fex --help` and examples/README.md.
+# Uses the Python of the virtual environment once `fex prepare` has created it.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do  # follow symlinks, so that `fex link` works
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ROOT="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+VENV="${FEX_VENV:-$ROOT/.venv}"
+if [ -x "$VENV/bin/python" ]; then
+    exec "$VENV/bin/python" "$ROOT/examples/fex.py" "$@"
+fi
+exec python3 "$ROOT/examples/fex.py" "$@"
