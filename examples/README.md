@@ -94,6 +94,10 @@ cp examples/.env.example examples/.env   # and fill in the password
 `.env` is ignored by git. The variables are `ARANGO_URL`, `ARANGO_DB`, `ARANGO_USER`
 and `ARANGO_PASSWORD`; environment variables win over the file.
 
+If the server uses https with a self-signed certificate, the connection fails with
+"Can't connect to host(s) within limit". Set `ARANGO_VERIFY=false` in `.env` to skip
+the certificate check, or set it to the path of the CA certificate to trust.
+
 What the examples create in that database:
 
 | Collection | Created by | Content |

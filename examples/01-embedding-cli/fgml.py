@@ -57,6 +57,20 @@ def load_env() -> None:
         return
 
 
+def tls_verify() -> Any:
+    """ARANGO_VERIFY: unset = normal certificate check, 'false' = no check (for a
+    self-signed certificate on your own machine), or the path of a CA bundle."""
+    value = os.environ.get("ARANGO_VERIFY", "").strip()
+    if not value:
+        return None
+    if value.lower() in ("false", "0", "no", "off"):
+        import urllib3
+
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        return False
+    return value
+
+
 def connect() -> Any:
     """Connects to the ArangoDB database configured in the environment."""
     from arango import ArangoClient
@@ -68,10 +82,16 @@ def connect() -> Any:
     user = os.environ.get("ARANGO_USER", "root")
     password = os.environ.get("ARANGO_PASSWORD", "")
     try:
-        return ArangoClient(hosts=url).db(name, user, password, verify=True)
+        client = ArangoClient(hosts=url, verify_override=tls_verify())
+        return client.db(name, user, password, verify=True)
     except Exception as e:
         console.print(f"[red]Could not connect to database '{name}' at {url}:[/] {e}")
         console.print("Check ARANGO_URL, ARANGO_DB, ARANGO_USER and ARANGO_PASSWORD.")
+        if url.startswith("https") and tls_verify() is None:
+            console.print(
+                "For a self-signed certificate set ARANGO_VERIFY=false "
+                "(or to the path of your CA certificate)."
+            )
         raise typer.Exit(1)
 
 

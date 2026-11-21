@@ -64,6 +64,20 @@ def load_env() -> None:
         return
 
 
+def tls_verify() -> Any:
+    """ARANGO_VERIFY: unset = normal certificate check, 'false' = no check (for a
+    self-signed certificate on your own machine), or the path of a CA bundle."""
+    value = os.environ.get("ARANGO_VERIFY", "").strip()
+    if not value:
+        return None
+    if value.lower() in ("false", "0", "no", "off"):
+        import urllib3
+
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        return False
+    return value
+
+
 def mode() -> str:
     """'arangodb' (default) or 'offline' (PyG dataset, everything in memory)."""
     load_env()
@@ -76,7 +90,11 @@ def connect() -> Any:
 
     load_env()
     logging.getLogger("urllib3").setLevel(logging.ERROR)
-    return ArangoClient(hosts=os.environ.get("ARANGO_URL", "http://localhost:8529")).db(
+    client = ArangoClient(
+        hosts=os.environ.get("ARANGO_URL", "http://localhost:8529"),
+        verify_override=tls_verify(),
+    )
+    return client.db(
         os.environ.get("ARANGO_DB", "fastgraphml_examples"),
         os.environ.get("ARANGO_USER", "root"),
         os.environ.get("ARANGO_PASSWORD", ""),
