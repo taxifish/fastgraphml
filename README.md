@@ -11,19 +11,41 @@
 Given an input graph it generates Graph Embeddings using Low-Code framework built on top of [PyG](https://pytorch-geometric.readthedocs.io/en/latest/). The package supports training on both GPU and CPU enabled machines. Training jobs on GPUs results in much faster execution and increased in performance when it comes to handling large graphs as compared to CPUs. In addition, the framework provides tight integration with  [ArangoDB](https://www.arangodb.com/) which is a scalable, fully managed graph database, document store and search engine in one place. Once Graph Embeddings are generated, they can be used for various downstream machine learning tasks like Node Classification, Link Prediction, Visualisation, Community Detection, Similartiy Search, Recommendation, etc. 
 
 ## Installation
-[ArangoDB](https://www.arangodb.com/)
-#### Required Python Dependencies
-1. PyTorch `1.12.*` is required.
-    * Install using previous version that matches your CUDA version: [pytorch](https://pytorch.org/get-started/previous-versions/)
-        * To find your installed CUDA version run `nvidia-smi` in your terminal.
-2. [pyg](https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html)
-3. [FAISS](https://github.com/facebookresearch/faiss/blob/main/INSTALL.md)
-    * Note: For FAISS-CPU one needs `numba==0.53.0`
 
-#### Latest Release
-```
-pip install fastgraphml
-```
+Python 3.10 or newer is required. The library is tested with PyTorch 2.12 and 2.15, PyG 2.8 and NumPy 2.
+
+1. Install [PyTorch](https://pytorch.org/get-started/locally/) for your CUDA version (run `nvidia-smi` to find it).
+2. Install the PyG extension matching your PyTorch and CUDA version, see the [PyG installation notes](https://pytorch-geometric.readthedocs.io/en/latest/install/installation.html). For example, for PyTorch 2.12 on CPU:
+    ```
+    pip install pyg-lib -f https://data.pyg.org/whl/torch-2.12.0+cpu.html
+    ```
+    `pyg-lib` provides the neighborhood sampling used to train `SAGE` and `GAT` on mini-batches. Without it (and without `torch-sparse`) these models are trained on the full graph, which only works for small graphs. Wheels are published for specific PyTorch versions, so pick a PyTorch version they exist for. `torch-cluster` is not needed anymore.
+3. Install fastgraphml:
+    ```
+    pip install "fastgraphml[all] @ git+https://github.com/taxifish/fastgraphml"
+    ```
+
+The extras are optional, leave out what you do not need:
+
+Extra | Installs | Needed for
+----- | -------- | ----------
+`arango` | `adbpyg-adapter`, `arango-datasets` | reading graphs from [ArangoDB](https://www.arangodb.com/), example datasets
+`search` | `faiss-cpu` | similarity search
+`viz` | `umap-learn`, `matplotlib`, `seaborn` | visualisation of embeddings
+`all` | all of the above |
+
+Note: `adbpyg-adapter` needs `torch-sparse` and `torch-scatter`, install them from the same wheel index as `pyg-lib` first (`pip install pyg-lib torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.12.0+cpu.html`), otherwise pip compiles them from source. It also requires `python-arango` 7.x.
+
+### Changes in 0.1.0
+
+* `SAGE` and `GAT` use PyG's `LinkNeighborLoader` instead of the deprecated `NeighborSampler` and `torch-cluster`.
+* Labels are optional for all models: without labels (`y`) the validation is skipped and the best model is the one with the lowest training loss.
+* `GAT` returns embeddings with `embedding_size` dimensions (before: `embedding_size * heads`).
+* `_train(epochs=N)` trains for N epochs (before: N - 1). `fit()` is an alias of `_train()`, and `ckp_path=None` / `best_model_path=None` turn the checkpoints off.
+* All models take a `device` argument.
+* `store_embeddings` keeps the link to the source documents for graphs read from ArangoDB (same `_key`, plus a `source_id` attribute), uses its `top_k_nbors`, `nlist` and `search_type` arguments, does not hardcode the replication factor anymore and replaces existing documents when it is run again.
+* `similarity_search` no longer normalises the embeddings passed to it in place.
+* Parallel edges are removed before metapaths are added for `DMGI`.
 
 ## Quickstart: Graph Embedding Generation
 
@@ -142,7 +164,8 @@ This method helps in visualization of generated Graph Embeddings by reducing the
 class_names = {0: 'Desktops',1: 'Data Storage',2: 'Laptops',3: 'Monitors',4: 'Computer Components',
  5: 'Video Projectors',6: 'Routers',7: 'Tablets',8: 'Networking Products',9: 'Webcams'}
 # with one line of code
-downstream_tasks.visualize_embeddings(model.G, embeddings, class_mapping=class_names, emb_percent=0.1) # model.G is PyG data object
+downstream_tasks.visualize_embeddings(model.G, embeddings, class_mapping=class_names, emb_percent=0.1,
+                                      save_path="./umap_embd_visualization.png") # model.G is PyG data object
 ```
 ### Downstream Task 2: Scalable Similarity Search with Faiss
 [Faiss](https://engineering.fb.com/2017/03/29/data-infrastructure/faiss-a-library-for-efficient-similarity-search/) is a tool developed by Facebook that performs similarity search in sets of vectors of any size, up to ones that possibly do not fit in RAM.
@@ -158,5 +181,11 @@ If nearest_nbors_search=True, store_embeddings method saves generated Graph Embe
 ```python
 model.graph_util.store_embeddings(embeddings, collection_name='emb', batch_size=100, class_mapping=None, 
         nearest_nbors_search=False, top_k_nbors=10, nlist=10, search_type='exact')
+```
+If the graph was read from ArangoDB, every document of the `emb` collection has the same `_key` as the vertex it belongs to and a `source_id` attribute with the `_id` of that vertex, so embeddings can be joined with their vertices in AQL:
+```
+FOR e IN emb
+    LET vertex = DOCUMENT(e.source_id)
+    RETURN { vertex, embedding: e.embedding }
 ```
 

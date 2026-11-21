@@ -1,6 +1,5 @@
 from typing import Any, Tuple, Union
 
-import faiss
 import numpy as np
 import numpy.typing as npt
 
@@ -10,7 +9,7 @@ def similarity_search(
     top_k_nbors: int = 10,
     nlist: int = 10,
     search_type: str = "exact",
-) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.int64]]:
+) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.int64]]:
     """Performs similarity search in sets of vectors of any size, up to ones that
     possibly do not fit in RAM using FAISS.
 
@@ -19,6 +18,8 @@ def similarity_search(
     returns dist, nbors
         nbors: node ids with similar embeddings
         dist: corresponding similarity scores
+
+    The embeddings passed in are not modified.
 
     :graph_emb (type: 2D numpy array): Numpy array of size (n, embedding_size),
     n: number of nodes in graph
@@ -31,36 +32,40 @@ def similarity_search(
     2. approx search: For scalable similarity search but at the cost of some precision
         loss.
     """
+    if search_type not in ("exact", "approx"):
+        raise ValueError("Pass search type either exact or approx.")
 
-    emb_dim = graph_emb.shape[1]
+    try:
+        import faiss
+    except ImportError as e:
+        raise ImportError(
+            "Similarity search needs FAISS: pip install 'fastgraphml[search]'"
+        ) from e
+
+    # FAISS needs C-contiguous float32 and normalises in place, so work on a copy
+    emb = np.array(graph_emb, dtype=np.float32, order="C", copy=True)
+    emb_dim = emb.shape[1]
+    # L2 normalization of embeddings, inner product is then the cosine similarity
+    faiss.normalize_L2(emb)
+
     # exact search
     if search_type == "exact":
         # inner product search index
-        search_index = faiss.IndexFlatIP(emb_dim)
-        # normalize the embeddings and add to search index
-        faiss.normalize_L2(graph_emb)
-        search_index.add(graph_emb)
-        # search top-k nearest neighbors of all embeddings
-        dist, nbors = search_index.search(graph_emb, k=top_k_nbors + 1)
-
+        search_index: Any = faiss.IndexFlatIP(emb_dim)
     # approx search
-    elif search_type == "approx":
+    else:
         # assign embeddings to specific cluster using Inner product
         quantiser = faiss.IndexFlatIP(emb_dim)
-        # L2 normalization of embeddings
-        faiss.normalize_L2(graph_emb)
         # creates partitioned search index
         search_index = faiss.IndexIVFFlat(
             quantiser, emb_dim, nlist, faiss.METRIC_INNER_PRODUCT
         )
-        # train and add the embeddings to the index
-        search_index.train(graph_emb)
-        search_index.add(graph_emb)
-        # nbors: top k node ids with highest cosine sim
-        # dist: cosine distances of top k nodes
-        dist, nbors = search_index.search(graph_emb, k=top_k_nbors + 1)
+        # train the index
+        search_index.train(emb)
 
-    else:
-        raise Exception("Pass search type either exact or approx.")
+    search_index.add(emb)
+    # nbors: top k node ids with highest cosine sim
+    # dist: cosine similarities of top k nodes
+    dist, nbors = search_index.search(emb, k=top_k_nbors + 1)
 
     return dist, nbors

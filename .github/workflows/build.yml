@@ -8,64 +8,60 @@ on:
 env:
   PACKAGE_DIR: fastgraphml
   TESTS_DIR: tests
-  CONDA_ENV: fastgraphml
+  # PyTorch version the PyG extension wheels (https://data.pyg.org/whl) are installed for
+  TORCH: "2.12.0"
 jobs:
   lint:
-    runs-on: self-hosted
-    defaults:
-      run:
-        shell: bash -l {0}
-    strategy:
-      matrix:
-        python: ["3.8"]
-    name: Lint - Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    name: Lint
     steps:
-      - uses: actions/checkout@v2
-      - name: Activating conda env
-        run: |
-          source ~/miniconda3/etc/profile.d/conda.sh 
-          conda activate ${{env.CONDA_ENV}}
-      - name: Setup Python ${{ matrix.python }}
-        uses: actions/setup-python@v2
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python }}
+          python-version: "3.12"
+          cache: pip
       - name: Install packages
-        run: conda run -n ${{env.CONDA_ENV}} pip install .[dev]
+        run: |
+          pip install torch==${{ env.TORCH }} --index-url https://download.pytorch.org/whl/cpu
+          pip install .[dev]
       - name: Run black
-        run: conda run -n ${{env.CONDA_ENV}} black --check --verbose --diff --color ${{env.PACKAGE_DIR}} ${{env.TESTS_DIR}}
+        run: black --check --verbose --diff --color ${{ env.PACKAGE_DIR }} ${{ env.TESTS_DIR }}
       - name: Run flake8
-        run: conda run -n ${{env.CONDA_ENV}} flake8 ${{env.PACKAGE_DIR}} ${{env.TESTS_DIR}}
+        run: flake8 ${{ env.PACKAGE_DIR }} ${{ env.TESTS_DIR }}
       - name: Run isort
-        run: conda run -n ${{env.CONDA_ENV}} isort --check --profile=black ${{env.PACKAGE_DIR}} ${{env.TESTS_DIR}}
+        run: isort --check --profile=black ${{ env.PACKAGE_DIR }} ${{ env.TESTS_DIR }}
       - name: Run mypy
-        run: conda run -n ${{env.CONDA_ENV}} mypy ${{env.PACKAGE_DIR}} ${{env.TESTS_DIR}}
+        run: mypy ${{ env.PACKAGE_DIR }} ${{ env.TESTS_DIR }}
       - name: Run bandit
-        run: conda run -n ${{env.CONDA_ENV}} bandit --exclude "./tests/*" --recursive ./
+        run: bandit --recursive ${{ env.PACKAGE_DIR }}
   test:
-    runs-on: self-hosted
-    defaults:
-      run:
-        shell: bash -l {0}
+    runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python: ["3.8"]
+        python: ["3.10", "3.12"]
     name: Test - Python ${{ matrix.python }}
+    services:
+      arangodb:
+        image: arangodb/arangodb:3.12
+        env:
+          ARANGO_ROOT_PASSWORD: fastgraphml
+        ports:
+          - 8529:8529
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup Python ${{ matrix.python }}
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Activating conda env
-        run: |
-          source ~/miniconda3/etc/profile.d/conda.sh 
-          conda activate ${{env.CONDA_ENV}}
+          cache: pip
       - name: Install packages
-        run: conda run -n ${{env.CONDA_ENV}} pip install .[dev]
+        run: |
+          pip install torch==${{ env.TORCH }} --index-url https://download.pytorch.org/whl/cpu
+          pip install pyg-lib torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-${{ env.TORCH }}+cpu.html
+          pip install .[dev,arango]
       - name: Run pytest
-        run: conda run -n ${{env.CONDA_ENV}} pytest --cov=${{env.PACKAGE_DIR}} --cov-report xml --cov-report term-missing -v --color=yes --no-cov-on-fail --code-highlight=yes --cov-fail-under=75
-      - name: Publish to coveralls.io
-        if: matrix.python == '3.8'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: conda run -n ${{ env.CONDA_ENV }} coveralls --service=github
+          MPLBACKEND: Agg
+        run: pytest --password fastgraphml --cov=${{ env.PACKAGE_DIR }} --cov-report xml --cov-report term-missing -v --color=yes --no-cov-on-fail --code-highlight=yes

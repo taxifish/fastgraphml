@@ -1,19 +1,15 @@
-import shutil
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
 from arango.database import Database
-from sklearn.linear_model import LogisticRegression
 from torch import Tensor
 from torch_geometric.data import Data
 from torch_geometric.nn import GCNConv
 from torch_geometric.typing import Adj, EdgeType, OptPairTensor
 
-from ..utils import GraphUtils
-
-# check for gpu
-device = "cuda" if torch.cuda.is_available() else "cpu"
+from ..utils import GraphUtils, check_inputs, has_labels, resolve_device
+from .base import TrainingLog, node_classification_accuracy, save_checkpoints
 
 
 class DMGI(torch.nn.Module):
@@ -39,7 +35,8 @@ class DMGI(torch.nn.Module):
     metapaths = [[("paper", "conference"), ("conference", "paper")],
          [("author", "paper"), ("paper", "conference")]]
     :key_node (type: str): Node type on which we want to test the performance of
-        generated graph embeddings. Performance is tested using node classification task
+        generated graph embeddings. Performance is tested using node classification task,
+        if this node type has labels (y), otherwise the validation is skipped.
     :pyg_graph (type: PyG data object): It generates graph embeddings using PyG graphs
         (via PyG data objects) directy rather than ArangoDB graphs. When generating
         graph embeddings via PyG graphs, database=arango_graph=metagraph=None.
@@ -51,6 +48,8 @@ class DMGI(torch.nn.Module):
                 for e.g. transform = T.Compose([
                         T.NormalizeFeatures(),
                         T.RandomNodeSplit(num_val=0.2, num_test=0.1)])
+    :device (type: str): Device to train on, e.g. 'cpu' or 'cuda'. By default the GPU
+        is used if there is one.
     :num_val (type: float): Percentage of nodes selected for validation set.
     :num_test (type: float): Percentage of nodes selected for test set.
 
@@ -71,20 +70,17 @@ class DMGI(torch.nn.Module):
         transform: Optional[List[Callable[..., Any]]] = None,
         num_val: float = 0.1,
         num_test: float = 0.1,
+        device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
 
-        if (
-            database is not None or arango_graph is not None or metagraph is not None
-        ) and pyg_graph is not None:
-            msg = "when generating graph embeddings via PyG data objects, database=arango_graph=metagraph=None and vice versa"  # noqa: E501
-            raise Exception(msg)
+        check_inputs(database, arango_graph, metagraph, pyg_graph)
+        if key_node is None or not metapaths:
+            raise ValueError(
+                "DMGI needs a key_node and the metapaths between its nodes."
+            )
 
-        if database is not None:
-            if not issubclass(type(database), Database):
-                msg = "**db** parameter must inherit from arango.database.Database"
-                raise TypeError(msg)
-
+        self.device = resolve_device(device)
         # arango to PyG
         self.graph_util = GraphUtils(
             arango_graph,
@@ -99,11 +95,14 @@ class DMGI(torch.nn.Module):
         )
         # get PyG graph
         G = self.graph_util.graph
-        G = G.to(device)
+        if getattr(G[key_node], "x", None) is None:
+            raise ValueError(f"DMGI needs node features (x) for the {key_node} nodes.")
+        G = G.to(self.device)
         self.G = G
         self.x = G[key_node].x.float()
-        self.edge_indices = G.edge_index_dict.values()
+        self.edge_indices = list(G.edge_index_dict.values())
         self.key_node = key_node
+        self.has_labels = has_labels(G[key_node])
 
         self.metadata = G.metadata()
         self.dropout_perc = dropout_perc
@@ -149,7 +148,7 @@ class DMGI(torch.nn.Module):
     def loss(
         self, pos_hs: List[Tensor], neg_hs: List[Tensor], summaries: List[Tensor]
     ) -> Tensor:
-        loss = 0.0
+        loss: Any = 0.0
         for pos_h, neg_h, s in zip(pos_hs, neg_hs, summaries):
             s = s.expand_as(pos_h)
             loss += -torch.log(self.M(pos_h, s).sigmoid() + 1e-15).mean()
@@ -167,21 +166,18 @@ class DMGI(torch.nn.Module):
     # save checkpoints whenever there is an increase in validation accuracy
     @staticmethod
     def save_checkpoints(
-        state: Dict[str, str], is_best: bool, ckp_path: str, best_model_path: str
+        state: Dict[str, Any],
+        is_best: bool,
+        ckp_path: Optional[str],
+        best_model_path: Optional[str],
     ) -> None:
-        file_path = ckp_path
-        torch.save(state, file_path)
-        # if it is a best model, min train loss
-        if is_best:
-            best_file_path = best_model_path
-            # copy best checkpoint file to best model path
-            shutil.copyfile(file_path, best_file_path)
+        save_checkpoints(state, is_best, ckp_path, best_model_path)
 
     def _train(
         self,
-        ckp_path: str = "./latest_model_checkpoint.pt",
-        best_model_path: str = "./best_model.pt",
-        epochs: int = 51,
+        ckp_path: Optional[str] = "./latest_model_checkpoint.pt",
+        best_model_path: Optional[str] = "./best_model.pt",
+        epochs: int = 50,
         lr: float = 0.0005,
         **kwargs: Any,
     ) -> None:
@@ -189,61 +185,36 @@ class DMGI(torch.nn.Module):
 
         :ckp_path (type: str): Path to save model's latest checkpoints
             (i.e. at each epoch). Pytorch models are saved with .pt file extension.
-            By default it saves model in cwd.
+            By default it saves model in cwd. Pass None to not save it.
         :best_model_path (type: str): Path to save model whenever there is an increase
-            in validation accuracy. By default it saves model in cwd.
+            in validation accuracy (or, if the key node has no labels, a decrease in
+            training loss). By default it saves model in cwd. Pass None to not
+            save it.
         :epochs (type: int): Number of times training data go through the model.
         :lr (type: float): Learning rate.
         :**kwargs: Additional arguments for the Adam optimizer for
             e.g. weight_decay, betas, etc.
         """
 
-        model = self.to(device)
+        model = self.to(self.device)
         optimizer = torch.optim.Adam(model.parameters(), lr, **kwargs)
-        best_acc = 0.0
+        log = TrainingLog(ckp_path, best_model_path)
         print("Training started .........")
-        for epoch in range(1, epochs):
+        for epoch in range(1, epochs + 1):
             model.train()
             optimizer.zero_grad()
             pos_hs, neg_hs, summaries = model(self.x, self.edge_indices)
             loss = model.loss(pos_hs, neg_hs, summaries)
             loss.backward()
-            loss = float(loss)
             optimizer.step()
 
-            ##################
-            # validate model #
-            ##################
+            # validate model
+            accs = self.val() if self.has_labels else None
+            log.epoch_end(epoch, float(loss.detach()), accs, model, optimizer)
 
-            val_acc, test_acc = self.val()
-
-            print(
-                f"Epoch: {epoch:03d}, Train_Loss: {loss:.4f}, "
-                f"Val: {val_acc:.4f}, Test: {test_acc:.4f}"
-            )
-
-            # create checkpoint variable and add crucial model information
-            model_checkpoint = {
-                "epoch": epoch,
-                "best_acc": val_acc,
-                "state_dict": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-            }
-
-            # save current/last checkpoint
-            # used for resuming training
-            self.save_checkpoints(model_checkpoint, False, ckp_path, best_model_path)
-
-            # save model if val acc increases
-            if val_acc > best_acc:
-                print(
-                    "Val Acc increased ({:.5f} --> {:.5f}).  Saving model ...".format(
-                        best_acc, val_acc
-                    )
-                )
-                # save checkpoint as best model
-                self.save_checkpoints(model_checkpoint, True, ckp_path, best_model_path)
-                best_acc = val_acc
+    def fit(self, *args: Any, **kwargs: Any) -> None:
+        """Train GraphML model, same as `_train`."""
+        self._train(*args, **kwargs)
 
     @torch.no_grad()
     def val(
@@ -256,25 +227,18 @@ class DMGI(torch.nn.Module):
 
         model: Graph embedding model.
         """
+        if not self.has_labels:
+            raise Exception(
+                f"The {self.key_node} nodes have no labels (y) to validate the "
+                "model with."
+            )
         self.eval()
-        train_emb = self.Z[self.G[self.key_node].train_mask].cpu()
-        val_emb = self.Z[self.G[self.key_node].val_mask].cpu()
-        test_emb = self.Z[self.G[self.key_node].test_mask].cpu()
-
-        train_y = self.G[self.key_node].y[self.G[self.key_node].train_mask].cpu()
-        val_y = self.G[self.key_node].y[self.G[self.key_node].val_mask].cpu()
-        test_y = self.G[self.key_node].y[self.G[self.key_node].test_mask].cpu()
-        clf = LogisticRegression(max_iter=400, class_weight="balanced")
-        clf.fit(train_emb, train_y)
-        val_acc = clf.score(val_emb, val_y)
-        test_acc = clf.score(test_emb, test_y)
-
-        return val_acc, test_acc
+        return node_classification_accuracy(self.Z, self.G[self.key_node])
 
     @torch.no_grad()
     def get_embeddings(
         self,
-    ) -> Dict[Optional[str], Any]:
+    ) -> Dict[str, Any]:
         """Returns Graph Embeddings for the key node only.
 
         Embeddings size: (n, embedding_size), where

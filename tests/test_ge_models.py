@@ -1,12 +1,14 @@
+"""Tests using the graphs stored in ArangoDB, skipped without an ArangoDB instance."""
+
+from typing import Any
+
 import pytest
 from torch_geometric.datasets import Planetoid
 
 from fastgraphml.graph_embeddings import DMGI, GAT, METAPATH2VEC, SAGE, downstream_tasks
 
-from .conftest import db  # type: ignore
 
-
-def test_sage() -> None:
+def test_sage(db: Any) -> None:
     metagraph = {
         "vertexCollections": {
             "cora_N": {"x": "x", "y": "y"},
@@ -54,7 +56,10 @@ def test_sage() -> None:
 
 # test sage model on PyG dataset directly
 def test_sage_pyg() -> None:
-    dataset_cora = Planetoid("./", "Cora")[0]
+    try:
+        dataset_cora = Planetoid("./", "Cora")[0]
+    except Exception as e:  # no network
+        pytest.skip(f"could not download the Cora dataset: {e}")
     model = SAGE(pyg_graph=dataset_cora, embedding_size=64)
     model._train(epochs=2)
     embeddings = model.get_embeddings()
@@ -62,7 +67,7 @@ def test_sage_pyg() -> None:
 
 
 # test gat model
-def test_gat() -> None:
+def test_gat(db: Any) -> None:
     metagraph = {
         "vertexCollections": {
             "cora_N": {"x": "x", "y": "y"},
@@ -71,14 +76,14 @@ def test_gat() -> None:
             "cora_E": {},
         },
     }
-    model = GAT(db, "graph", metagraph, embedding_size=64, heads=1)  # define model
+    model = GAT(db, "graph", metagraph, embedding_size=64, heads=2)  # define model
     model._train(epochs=2)  # train
     embeddings = model.get_embeddings()  # get embeddings
     # check embeddings size
     assert embeddings.size == int(173312)
 
 
-def test_m2v() -> None:
+def test_m2v(db: Any) -> None:
     metagraph = {
         "vertexCollections": {
             "movie": {"x": "x", "y": "y"},
@@ -113,7 +118,7 @@ def test_m2v() -> None:
     assert embeddings["movie"].size == int(17112)
 
 
-def test_dmgi() -> None:
+def test_dmgi(db: Any) -> None:
     metagraph = {
         "vertexCollections": {
             "movie": {"x": "x", "y": "y"},

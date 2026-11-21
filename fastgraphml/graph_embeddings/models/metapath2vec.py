@@ -1,18 +1,13 @@
-import shutil
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from arango.database import Database
-from sklearn.linear_model import LogisticRegression
-from torch import Tensor
 from torch_geometric.data import Data
 from torch_geometric.nn import MetaPath2Vec
 from torch_geometric.typing import EdgeType
 
-from ..utils import GraphUtils
-
-# check for gpu
-device = "cuda" if torch.cuda.is_available() else "cpu"
+from ..utils import GraphUtils, check_inputs, has_labels, resolve_device
+from .base import TrainingLog, node_classification_accuracy, save_checkpoints
 
 
 class METAPATH2VEC:
@@ -32,7 +27,8 @@ class METAPATH2VEC:
         perform random walks on the graph and then uses skip-grapm to compute
         graph embeddings.
     :key_node (type: str): Node type on which we want to test the performance of
-        generated graph embeddings. Performance is tested using node classification task.
+        generated graph embeddings. Performance is tested using node classification task,
+        if this node type has labels (y), otherwise the validation is skipped.
     :pyg_graph (type: PyG data object): It generates graph embeddings using PyG graphs
         (via PyG data objects) directy rather than ArangoDB graphs. When generating graph
         embeddings via PyG graphs, database=arango_graph=metagraph=None.
@@ -57,6 +53,8 @@ class METAPATH2VEC:
     :num_val (type: float): Percentage of nodes selected for validation set.
     :num_test (type: float): Percentage of nodes selected for test set.
     :shuffle (type: bool): If set to True, it shuffles data before training.
+    :device (type: str): Device to train on, e.g. 'cpu' or 'cuda'. By default the GPU
+        is used if there is one.
 
     Note: After selecting the percentage for validation and test nodes,
     rest percentage of the nodes are considered as training nodes.
@@ -70,7 +68,7 @@ class METAPATH2VEC:
         database: Database = None,
         arango_graph: Optional[str] = None,
         metagraph: Union[Dict[str, object], None] = None,
-        metapaths: List[EdgeType] = [0],
+        metapaths: Optional[List[EdgeType]] = None,
         key_node: Union[str, None] = None,
         pyg_graph: Data = None,
         embedding_size: int = 64,
@@ -85,19 +83,16 @@ class METAPATH2VEC:
         num_val: float = 0.1,
         num_test: float = 0.1,
         shuffle: bool = True,
+        device: Optional[Union[str, torch.device]] = None,
     ):
+        check_inputs(database, arango_graph, metagraph, pyg_graph)
+        if not metapaths:
+            raise ValueError("Pass the metapaths to perform the random walks on.")
+        if key_node is None:
+            # any node type of the metapath is fine if there are no labels
+            key_node = metapaths[0][0]
 
-        if (
-            database is not None or arango_graph is not None or metagraph is not None
-        ) and pyg_graph is not None:
-            msg = "when generating graph embeddings via PyG data objects, database=arango_graph=metagraph=None and vice versa"  # noqa: E501
-            raise Exception(msg)
-
-        if database is not None:
-            if not issubclass(type(database), Database):
-                msg = "**db** parameter must inherit from arango.database.Database"
-                raise TypeError(msg)
-
+        self.device = resolve_device(device)
         # arango tp pyg
         self.graph_util = GraphUtils(
             arango_graph,
@@ -114,6 +109,7 @@ class METAPATH2VEC:
         self.G = G
         self.metadata = G.metadata()
         self.key_node = key_node
+        self.has_labels = has_labels(G[key_node])
         # metapath2vec attributes
         self.edge_index_dict = self.G.edge_index_dict
         self.embeddin_size = embedding_size
@@ -127,25 +123,24 @@ class METAPATH2VEC:
         # loader attributes
         self.batch_size = batch_size
         self.shuffle = shuffle
+        # trained model, set by _train
+        self.m2v_model: Optional[MetaPath2Vec] = None
 
     # save checkpoints whenever there is an increase in validation accuracy
     @staticmethod
     def save_checkpoints(
-        state: Dict[str, str], is_best: bool, ckp_path: str, best_model_path: str
+        state: Dict[str, Any],
+        is_best: bool,
+        ckp_path: Optional[str],
+        best_model_path: Optional[str],
     ) -> None:
-        file_path = ckp_path
-        torch.save(state, file_path)
-        # if it is a best model, min train loss
-        if is_best:
-            best_file_path = best_model_path
-            # copy best checkpoint file to best model path
-            shutil.copyfile(file_path, best_file_path)
+        save_checkpoints(state, is_best, ckp_path, best_model_path)
 
     def _train(
         self,
-        ckp_path: str = "./latest_model_checkpoint.pt",
-        best_model_path: str = "./best_model.pt",
-        epochs: int = 51,
+        ckp_path: Optional[str] = "./latest_model_checkpoint.pt",
+        best_model_path: Optional[str] = "./best_model.pt",
+        epochs: int = 50,
         lr: float = 0.03,
         log_steps: int = 100,
         eval_steps: int = 2000,
@@ -155,9 +150,11 @@ class METAPATH2VEC:
 
         :ckp_path (type: str): Path to save model's latest checkpoints
             (i.e. at each epoch). Pytorch models are saved with .pt file extension.
-            By default it saves model in cwd.
+            By default it saves model in cwd. Pass None to not save it.
         :best_model_path (type: str): Path to save model whenever there is an increase
-            in validation accuracy. By default it saves model in cwd.
+            in validation accuracy (or, if the key node has no labels, a decrease in
+            training loss). By default it saves model in cwd. Pass None to not
+            save it.
         :epochs (type: int): Number of times training data go through the model.
         :lr (type: float): Learning rate.
         : log_steps (type: int): Logs epochs and loss.
@@ -166,7 +163,7 @@ class METAPATH2VEC:
         :**kwargs: Additional arguments for the Adam optimizer for
             e.g. weight_decay, betas, etc.
         """
-
+        device = self.device
         # model
         model = MetaPath2Vec(
             edge_index_dict=self.edge_index_dict,
@@ -182,21 +179,24 @@ class METAPATH2VEC:
 
         # transfer model to gpu
         model = model.to(device)
+        self.m2v_model = model
         # returns data loader that creates both positive and negative
         # random walks on the heterogeneous graph.
         loader = model.loader(batch_size=self.batch_size, shuffle=self.shuffle)
+        optimizer: torch.optim.Optimizer
         if self.sparse is True:
             optimizer = torch.optim.SparseAdam(
                 list(model.parameters()), lr=lr, **kwargs
             )
         else:
             optimizer = torch.optim.Adam(model.parameters(), lr=lr, **kwargs)
-        best_acc = 0.0
+        log = TrainingLog(ckp_path, best_model_path)
         print("Training started .........")
 
-        for epoch in range(1, epochs):
+        for epoch in range(1, epochs + 1):
             model.train()
-            total_loss = 0
+            total_loss = 0.0
+            epoch_loss = 0.0
             for i, (pos_rw, neg_rw) in enumerate(loader):
                 optimizer.zero_grad()
 
@@ -206,6 +206,7 @@ class METAPATH2VEC:
                 optimizer.step()
 
                 total_loss += loss.item()
+                epoch_loss += loss.item()
                 if (i + 1) % log_steps == 0:
                     print(
                         (
@@ -213,90 +214,56 @@ class METAPATH2VEC:
                             f"Loss: {total_loss / log_steps:.4f}"
                         )
                     )
-                    total_loss = 0
+                    total_loss = 0.0
 
-                if (i + 1) % eval_steps == 0:
+                if self.has_labels and (i + 1) % eval_steps == 0:
                     val_acc, test_acc = self.val(model)
+                    model.train()
                     print(
-                        (
-                            f"Epoch: {epoch}, Step: {i + 1:05d}/{len(loader)}, "
-                            f"Val_Acc: {val_acc:.4f}",
-                            f"Test_Acc:{test_acc:.4f}",
-                        )
+                        f"Epoch: {epoch}, Step: {i + 1:05d}/{len(loader)}, "
+                        f"Val_Acc: {val_acc:.4f}, Test_Acc: {test_acc:.4f}"
                     )
 
-            ##################
-            # validate model #
-            ##################
-
-            val_acc, test_acc = self.val(model)
-
-            print(
-                f"Epoch: {epoch:03d}, Train_Loss: {loss:.4f}, "
-                f"Val: {val_acc:.4f}, Test: {test_acc:.4f}"
+            # validate model
+            accs = self.val(model) if self.has_labels else None
+            log.epoch_end(
+                epoch, epoch_loss / max(len(loader), 1), accs, model, optimizer
             )
 
-            # create checkpoint variable and add crucial model information
-            model_checkpoint = {
-                "epoch": epoch,
-                "best_acc": val_acc,
-                "state_dict": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-            }
-
-            # save current/last checkpoint
-            # used for resuming training
-            self.save_checkpoints(model_checkpoint, False, ckp_path, best_model_path)
-
-            # save model if val acc increases
-            if val_acc > best_acc:
-                print(
-                    "Val Acc increased ({:.5f} --> {:.5f}).  Saving model ...".format(
-                        best_acc, val_acc
-                    )
-                )
-                # save checkpoint as best model
-                self.save_checkpoints(model_checkpoint, True, ckp_path, best_model_path)
-                best_acc = val_acc
+    def fit(self, *args: Any, **kwargs: Any) -> None:
+        """Train GraphML model, same as `_train`."""
+        self._train(*args, **kwargs)
 
     @torch.no_grad()
-    def val(self, model: Any) -> Tuple[float, float]:
+    def val(self, model: Any = None) -> Tuple[float, float]:
         """Tests the performance of a generated graph embeddings using Node
         Classification as a downstream task. Performance is tested on a node type
         (associated with labels) mentioned using key_node argument.
 
         returns validation and test accuracy on key node.
 
-        model: Graph embedding model.
+        model: Graph embedding model, by default the trained model.
         """
-
+        if model is None:
+            model = self._trained_model()
+        if not self.has_labels:
+            raise Exception(
+                f"The {self.key_node} nodes have no labels (y) to validate the "
+                "model with."
+            )
         model.eval()
         z = model(self.key_node)
-        y = self.G[self.key_node].y
-        train_node_idx = self.G[self.key_node].train_mask
-        val_node_idx = self.G[self.key_node].val_mask
-        test_node_idx = self.G[self.key_node].test_mask
-        clf = LogisticRegression(max_iter=400, class_weight="balanced")
-        clf.fit(
-            z[train_node_idx].detach().cpu().numpy(),
-            y[train_node_idx].detach().cpu().numpy(),
-        )
-        val_acc = clf.score(
-            z[val_node_idx].detach().cpu().numpy(),
-            y[val_node_idx].detach().cpu().numpy(),
-        )
-        test_acc = clf.score(
-            z[test_node_idx].detach().cpu().numpy(),
-            y[test_node_idx].detach().cpu().numpy(),
-        )
+        return node_classification_accuracy(z, self.G[self.key_node])
 
-        self.m2v_model = model
-        return val_acc, test_acc
+    def _trained_model(self) -> MetaPath2Vec:
+        if self.m2v_model is None:
+            raise Exception("Train the model first: model._train()")
+        return self.m2v_model
 
     @torch.no_grad()
     def get_embeddings(
         self,
-    ) -> Dict[str, Tensor]:
+    ) -> Dict[str, Any]:
         """Returns Graph Embeddings as a dictionary {node_type1:emb1, node_type2:emb2,
 
         ....} where embeddings for each node type is present, if that node type is used
@@ -307,16 +274,17 @@ class METAPATH2VEC:
         embedding_size: Length of the node embeddings when they are mapped to
             d-dimensional euclidean space.
         """
-
+        model = self._trained_model()
+        model.eval()
         emb = {}
         metapath_nodes = []
-        for idx in range(len(self.metapath)):
-            src_node, _, dest_node = self.metapath[idx]
-            metapath_nodes.append(src_node)
-            metapath_nodes.append(dest_node)
+        for src_node, _, dest_node in self.metapath:
+            if src_node not in metapath_nodes:
+                metapath_nodes.append(src_node)
+            if dest_node not in metapath_nodes:
+                metapath_nodes.append(dest_node)
 
-        metapath_nodes = list(set(metapath_nodes))
         for node in metapath_nodes:
-            emb[node] = self.m2v_model(node).detach().cpu().numpy()
+            emb[node] = model(node).detach().cpu().numpy()
 
         return emb

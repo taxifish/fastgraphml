@@ -1,11 +1,8 @@
 import math
 from typing import Any, Dict, Optional, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
-import seaborn as sns
-import umap
 from torch_geometric.data import Data
 
 
@@ -15,6 +12,7 @@ def visualize_embeddings(
     class_mapping: Optional[Dict[int, str]] = None,
     node_type: Optional[str] = None,
     emb_percent: float = 0.1,
+    save_path: Optional[str] = "./umap_embd_visualization.png",
 ) -> None:
     """Performs dimensionality reduction (2D) and visualization of graph embeddings
     using U-Map.
@@ -35,36 +33,38 @@ def visualize_embeddings(
          perform visualization. Used to store Hetero graph embeddings.
     :emb_perc (type: float): Percentage of embeddings to visualize, 0.1 means 10% of
          data will be visualized.
+    :save_path (type: str): Where the figure is saved. Pass None to not save it.
     """
+    try:
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        import umap
+    except ImportError as e:
+        raise ImportError(
+            "Visualisation needs umap-learn, matplotlib and seaborn: "
+            "pip install 'fastgraphml[viz]'"
+        ) from e
 
-    if node_type is not None:
-        y_np = graph[node_type].y.cpu().numpy()
-    else:
-        y_np = graph.y.cpu().numpy()
+    store = graph[node_type] if node_type is not None else graph
+    y = getattr(store, "y", None)
 
     num_nodes = math.floor(graph_emb.shape[0] * emb_percent)
-    num_y = math.floor(y_np.shape[0] * emb_percent)
     graph_emb = graph_emb[:num_nodes]
-    labels = y_np[:num_y]
     umap_embd = umap.UMAP().fit_transform(graph_emb)
     plt.figure(figsize=(8, 8))
-    if class_mapping is not None:
-        palette = {}
-        class_names = [class_mapping[label] for label in labels]
-        for n, y in enumerate(set(np.array(class_names))):
-            palette[y] = f"C{n}"
-        sns.scatterplot(
-            x=umap_embd.T[0],
-            y=umap_embd.T[1],
-            hue=np.array(class_names),
-            palette=palette,
-        )
-        plt.legend(bbox_to_anchor=(1, 1), loc="upper left")
-        plt.savefig("./umap_embd_visualization.png", dpi=120)
+
+    if y is None:
+        # graph without labels: nothing to colour the points with
+        sns.scatterplot(x=umap_embd.T[0], y=umap_embd.T[1])
     else:
-        palette = {}
-        for n, y in enumerate(set(labels)):
-            palette[y] = f"C{n}"
-        sns.scatterplot(x=umap_embd.T[0], y=umap_embd.T[1], hue=labels, palette=palette)
+        labels = y.cpu().numpy()[:num_nodes]
+        if class_mapping is not None:
+            hue = np.array([class_mapping[label] for label in labels.tolist()])
+        else:
+            hue = labels
+        palette = {name: f"C{n}" for n, name in enumerate(sorted(set(hue.tolist())))}
+        sns.scatterplot(x=umap_embd.T[0], y=umap_embd.T[1], hue=hue, palette=palette)
         plt.legend(bbox_to_anchor=(1, 1), loc="upper left")
-        plt.savefig("./umap_embd_visualization.png", dpi=120)
+
+    if save_path is not None:
+        plt.savefig(save_path, dpi=120, bbox_inches="tight")
