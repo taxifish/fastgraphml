@@ -161,6 +161,10 @@ embeddings = model.get_embeddings()
 
 `SAGE`, `GAT` and `DMGI` need node features (`x`); `METAPATH2VEC` learns from the graph structure alone.
 
+## Guides
+
+Two PDF guides are in the [docs](docs/README.md) folder: [fastgraphml explained](docs/fastgraphml-explained.pdf) describes how the library and its four models work, [Getting started with fastgraphml](docs/fastgraphml-getting-started.pdf) goes from installation to the example projects.
+
 ## Example Projects
 
 The [examples](examples/README.md) folder has three complete projects built on fastgraphml, each with its own documentation and an offline mode that runs without a database:
