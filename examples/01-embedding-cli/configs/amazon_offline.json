@@ -1,0 +1,42 @@
+{
+  "name": "amazon-offline",
+  "description": "Offline: GraphSAGE on the Amazon Computers co-purchase graph (PyG dataset, no database needed).",
+  "source": {
+    "type": "pyg",
+    "dataset": "Amazon",
+    "args": {
+      "name": "Computers"
+    }
+  },
+  "model": {
+    "name": "SAGE",
+    "params": {
+      "embedding_size": 64,
+      "num_layers": 2,
+      "sizes": [
+        10,
+        10
+      ],
+      "batch_size": 512,
+      "transform": [
+        "NormalizeFeatures"
+      ]
+    }
+  },
+  "train": {
+    "epochs": 10,
+    "lr": 0.005
+  },
+  "class_names": {
+    "0": "Desktops",
+    "1": "Data Storage",
+    "2": "Laptops",
+    "3": "Monitors",
+    "4": "Computer Components",
+    "5": "Video Projectors",
+    "6": "Routers",
+    "7": "Tablets",
+    "8": "Networking Products",
+    "9": "Webcams"
+  }
+}

@@ -46,6 +46,7 @@ Note: `adbpyg-adapter` needs `torch-sparse` and `torch-scatter`, install them fr
 * `store_embeddings` keeps the link to the source documents for graphs read from ArangoDB (same `_key`, plus a `source_id` attribute), uses its `top_k_nbors`, `nlist` and `search_type` arguments, does not hardcode the replication factor anymore and replaces existing documents when it is run again.
 * `similarity_search` no longer normalises the embeddings passed to it in place.
 * Parallel edges are removed before metapaths are added for `DMGI`.
+* One epoch of `SAGE` and `GAT` uses one random edge per node as positive example, as the original implementation did.
 
 ## Quickstart: Graph Embedding Generation
 
@@ -142,6 +143,36 @@ model = SAGE(pyg_graph=data, embedding_size=64) # define graph embedding model
 model._train(epochs=10) # train
 embeddings = model.get_embeddings() # get embeddings
 ```
+### Use Case 3: Graphs without labels
+
+Labels (`y`) are only used to report the validation accuracy during training. Without them the validation is skipped and the best checkpoint is the one with the lowest training loss:
+
+```python
+from fastgraphml.graph_embeddings import SAGE
+
+metagraph = {
+    "vertexCollections": {"Computer_Products": {"x": "features"}},  # no "y"
+    "edgeCollections": {"bought_together": {}},
+}
+model = SAGE(db, "product_graph", metagraph, embedding_size=64, device="cpu")
+model.fit(epochs=10, ckp_path=None, best_model_path="./best_model.pt")  # fit() is the same as _train()
+embeddings = model.get_embeddings()
+```
+
+`SAGE`, `GAT` and `DMGI` need node features (`x`); `METAPATH2VEC` learns from the graph structure alone.
+
+## Example Projects
+
+The [examples](examples/README.md) folder has three complete projects built on fastgraphml, each with its own documentation and an offline mode that runs without a database:
+
+Project | What it shows | Interface
+------- | ------------- | ---------
+[Embedding pipeline CLI](examples/01-embedding-cli/README.md) | One JSON config per embedding job: train, evaluate, store, query | Command line
+[Product recommender](examples/02-product-recommender/README.md) | Recommendations on the Amazon Computers co-purchase graph with GraphSAGE | FastAPI + React
+[Clinical site finder](examples/03-clinical-site-finder/README.md) | Lookalike search on a heterogeneous graph with METAPATH2VEC | FastAPI + React
+
+The two notebooks in the same folder walk through the Amazon Computers and the DBLP graph step by step.
+
 ## Models Supported
 
 Model         | Homogeneous   | Heterogeneous | Node Features
@@ -154,7 +185,7 @@ Model         | Homogeneous   | Heterogeneous | Node Features
 
 
 ## Quickstart: Downstream Tasks
-In addition, the library also provides various low-code helper methods to carry out number of downstream tasks such as visualisation, similarity search (recommendation) , and link prediction (to be added soon).
+In addition, the library provides low-code helper methods for two downstream tasks: visualisation and similarity search (recommendation). They need the `viz` and `search` extras.
 
 ### Downstream Task 1: Graph Embedding Visualisation
 This method helps in visualization of generated Graph Embeddings by reducing them 2 dimensions using U-Map.

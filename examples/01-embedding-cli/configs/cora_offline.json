@@ -1,0 +1,36 @@
+{
+  "name": "cora",
+  "description": "Offline: GraphSAGE on the Cora citation graph (PyG dataset, no database needed).",
+  "source": {
+    "type": "pyg",
+    "dataset": "Planetoid",
+    "args": {
+      "name": "Cora"
+    }
+  },
+  "model": {
+    "name": "SAGE",
+    "params": {
+      "embedding_size": 64,
+      "num_layers": 2,
+      "sizes": [
+        10,
+        10
+      ],
+      "batch_size": 256
+    }
+  },
+  "train": {
+    "epochs": 10,
+    "lr": 0.001
+  },
+  "class_names": {
+    "0": "Theory",
+    "1": "Reinforcement Learning",
+    "2": "Genetic Algorithms",
+    "3": "Neural Networks",
+    "4": "Probabilistic Methods",
+    "5": "Case Based",
+    "6": "Rule Learning"
+  }
+}

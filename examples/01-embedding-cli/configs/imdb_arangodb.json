@@ -1,0 +1,62 @@
+{
+  "name": "imdb",
+  "description": "METAPATH2VEC on the heterogeneous IMDB graph stored in ArangoDB (load it with `fgml.py load-demo IMDB_X`). Movies that share actors get similar embeddings.",
+  "source": {
+    "type": "arangodb",
+    "graph": "IMDB_X",
+    "metagraph": {
+      "vertexCollections": {
+        "movie": {
+          "x": "x",
+          "y": "y"
+        },
+        "director": {
+          "x": "x"
+        },
+        "actor": {
+          "x": "x"
+        }
+      },
+      "edgeCollections": {
+        "to": {}
+      }
+    }
+  },
+  "model": {
+    "name": "METAPATH2VEC",
+    "params": {
+      "metapaths": [
+        [
+          "movie",
+          "to",
+          "actor"
+        ],
+        [
+          "actor",
+          "to",
+          "movie"
+        ]
+      ],
+      "key_node": "movie",
+      "embedding_size": 128,
+      "walk_length": 5,
+      "context_size": 6,
+      "walks_per_node": 5,
+      "num_negative_samples": 5,
+      "sparse": true
+    }
+  },
+  "train": {
+    "epochs": 10,
+    "lr": 0.03
+  },
+  "store": {
+    "collection": "movie_embeddings",
+    "node_type": "movie",
+    "class_names": {
+      "0": "Action",
+      "1": "Comedy",
+      "2": "Drama"
+    }
+  }
+}

@@ -4,3 +4,13 @@ fastgraphml.egg-info/
 fastgraphml/.DS_Store
 dist/
 
+
+# examples
+.env
+examples/**/runs/
+examples/**/.data/
+examples/**/.cache/
+examples/**/node_modules/
+examples/**/frontend/dist/
+*.pt
+umap_embd_visualization.png

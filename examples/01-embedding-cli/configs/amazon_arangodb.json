@@ -1,0 +1,54 @@
+{
+  "name": "amazon",
+  "description": "GraphSAGE on the Amazon Computer Products graph stored in ArangoDB (load it with `fgml.py load-demo`). Embeddings are stored in the product_embeddings collection.",
+  "source": {
+    "type": "arangodb",
+    "graph": "product_graph",
+    "metagraph": {
+      "vertexCollections": {
+        "Computer_Products": {
+          "x": "features",
+          "y": "label"
+        }
+      },
+      "edgeCollections": {
+        "bought_together": {}
+      }
+    }
+  },
+  "model": {
+    "name": "SAGE",
+    "params": {
+      "embedding_size": 64,
+      "num_layers": 2,
+      "sizes": [
+        10,
+        10
+      ],
+      "batch_size": 512,
+      "transform": [
+        "NormalizeFeatures"
+      ]
+    }
+  },
+  "train": {
+    "epochs": 10,
+    "lr": 0.005
+  },
+  "store": {
+    "collection": "product_embeddings",
+    "nearest_neighbors": 10,
+    "class_names": {
+      "0": "Desktops",
+      "1": "Data Storage",
+      "2": "Laptops",
+      "3": "Monitors",
+      "4": "Computer Components",
+      "5": "Video Projectors",
+      "6": "Routers",
+      "7": "Tablets",
+      "8": "Networking Products",
+      "9": "Webcams"
+    }
+  }
+}

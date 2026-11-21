@@ -106,6 +106,35 @@ class TrainingLog:
         save_checkpoints(model_checkpoint, is_best, self.ckp_path, self.best_model_path)
 
 
+class OneEdgePerNode(torch.utils.data.Sampler[int]):
+    """Samples, in every epoch, one random outgoing edge of every node.
+
+    An epoch then has (at most) as many positive examples as the graph has nodes,
+    as in the GraphSage paper, instead of one per edge, which would make epochs
+    on dense graphs very long.
+    """
+
+    def __init__(self, edge_index: Tensor, num_nodes: int, shuffle: bool = True):
+        src = edge_index[0].cpu()
+        # edge ids sorted by source node, and where the edges of each node start
+        self.perm = torch.argsort(src, stable=True)
+        self.degree = torch.bincount(src, minlength=num_nodes)
+        self.start = torch.cumsum(self.degree, dim=0) - self.degree
+        self.nodes = torch.nonzero(self.degree > 0).view(-1)
+        self.shuffle = shuffle
+
+    def __len__(self) -> int:
+        return int(self.nodes.numel())
+
+    def __iter__(self) -> Any:
+        nodes = self.nodes
+        if self.shuffle:
+            nodes = nodes[torch.randperm(nodes.numel())]
+        degree = self.degree[nodes]
+        offset = (torch.rand(nodes.numel()) * degree).long().clamp(max=degree - 1)
+        return iter(self.perm[self.start[nodes] + offset].tolist())
+
+
 class HomogeneousEmbeddingModel(nn.Module):
     """Unsupervised training of a GNN encoder on a homogeneous graph, shared by
     the SAGE and the GAT model.
@@ -171,8 +200,9 @@ class HomogeneousEmbeddingModel(nn.Module):
         self.train_loader = self._create_loader()
 
     def _create_loader(self) -> Optional[LinkNeighborLoader]:
-        """For each edge in a batch (positive example) the loader samples a random
-        pair of nodes (negative example), and the neighborhood of all these nodes.
+        """In every epoch one random edge per node is a positive example. For each
+        of them the loader samples a random pair of nodes (negative example), and
+        the neighborhood of all these nodes.
 
         Neighborhood sampling needs pyg-lib (or torch-sparse). Without them the
         model is trained on the full graph, which is fine for small graphs only.
@@ -190,7 +220,7 @@ class HomogeneousEmbeddingModel(nn.Module):
             data,
             num_neighbors=self.sizes,
             batch_size=self.batch_size,
-            shuffle=self.shuffle,
+            sampler=OneEdgePerNode(self.edge_index, self.num_nodes, self.shuffle),
             neg_sampling_ratio=1.0,
         )
 
