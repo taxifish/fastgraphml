@@ -35,7 +35,7 @@ def build() -> str:
 <h1>{TITLE}</h1>
 <p class="lead">What the library is for, how it turns a graph into embeddings step by step,
 and what happens inside each of its four models.</p>
-<p class="meta">Describes fastgraphml 0.1.0 (branch examples-and-docs of taxifish/fastgraphml),
+<p class="meta">Describes fastgraphml 0.1.0 (github.com/taxifish/fastgraphml),
 tested with PyTorch 2.12 and 2.15, PyG 2.8, Python 3.13. A second guide, Getting started with
 fastgraphml, covers installation, first steps and the three example projects.</p>
 <ul class="toc">{toc}</ul>

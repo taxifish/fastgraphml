@@ -44,7 +44,7 @@ def build() -> str:
 <h1>{TITLE}</h1>
 <p class="lead">From an empty Python environment to embeddings of your own graph, followed by
 a tour of the three example projects in the repository.</p>
-<p class="meta">Describes fastgraphml 0.1.0 (branch examples-and-docs of taxifish/fastgraphml).
+<p class="meta">Describes fastgraphml 0.1.0 (github.com/taxifish/fastgraphml).
 The companion guide, fastgraphml explained, describes how the models work.</p>
 <ul class="toc">{toc}</ul>
 
@@ -56,7 +56,6 @@ CPU. ArangoDB is only needed from section 4 on.</p>
 <li><b>Create an environment and install PyTorch.</b>
 {code('''
 git clone https://github.com/taxifish/fastgraphml && cd fastgraphml
-git checkout examples-and-docs
 python -m venv .venv && source .venv/bin/activate
 pip install torch
 ''', "bash")}</li>
